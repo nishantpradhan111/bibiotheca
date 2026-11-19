@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reservation
+  namespace: library
+spec:
+  # The HPA owns replicas; GitOps must not reset its scale decisions.
+  selector:
+    matchLabels: {app: reservation}
+  template:
+    metadata:
+      labels: {app: reservation}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reservation
+          image: "380560899065.dkr.ecr.ap-south-1.amazonaws.com/digital-library-dev/reservation@sha256:dad537a25032002635588ab731c1d3509bc06704ab64091c4f7da7bbd4c6accb"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8003
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: reservation-database
+                  key: url
+            - name: MEMBER_URL
+              value: http://member
+            - name: AVAILABILITY_URL
+              value: http://availability
+            - name: ZOOKEEPER_HOSTS
+              value: zookeeper-0.zookeeper:2181,zookeeper-1.zookeeper:2181,zookeeper-2.zookeeper:2181
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: kafka:9092
+            - name: KAFKA_INPUT_TOPIC
+              value: library.events.v1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 3
+            failureThreshold: 20
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+          volumeMounts:
+            - name: temporary
+              mountPath: /tmp
+            - name: rds-ca
+              mountPath: /etc/rds-ca
+              readOnly: true
+      volumes:
+        - name: rds-ca
+          configMap:
+            name: rds-ca
+        - name: temporary
+          emptyDir:
+            sizeLimit: 100Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: reservation
+  namespace: library
+spec:
+  selector: {app: reservation}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

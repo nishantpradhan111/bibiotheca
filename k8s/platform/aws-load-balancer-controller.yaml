@@ -1,0 +1,47 @@
+# Argo CD installs the controller from the pinned AWS-maintained Helm chart.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aws-load-balancer-controller
+  namespace: kube-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    eks.amazonaws.com/role-arn: __LBC_ROLE_ARN__
+---
+# The child Application keeps controller installation and upgrades in GitOps.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aws-load-balancer-controller
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://aws.github.io/eks-charts
+    chart: aws-load-balancer-controller
+    targetRevision: 1.14.0
+    helm:
+      parameters:
+        - name: clusterName
+          value: __EKS_CLUSTER_NAME__
+        - name: region
+          value: __AWS_REGION__
+        - name: vpcId
+          value: __VPC_ID__
+        - name: serviceAccount.create
+          value: "false"
+        - name: serviceAccount.name
+          value: aws-load-balancer-controller
+        - name: replicaCount
+          value: "1"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

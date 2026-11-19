@@ -1,0 +1,98 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: notification
+  namespace: library
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::380560899065:role/digital-library-dev-notification-api"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification
+  namespace: library
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: notification}
+  template:
+    metadata:
+      labels: {app: notification}
+    spec:
+      serviceAccountName: notification
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: notification
+          image: "380560899065.dkr.ecr.ap-south-1.amazonaws.com/digital-library-dev/notification@sha256:5a7fd98e59cca285d8d0f249b7a1a2faac52fcd1fea3d8c2424007219aed8b16"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8004
+          env:
+            - name: AWS_EC2_METADATA_DISABLED
+              value: "true"
+            - name: AWS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: notification-config
+                  key: AWS_REGION
+            - name: NOTIFICATION_QUEUE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: notification-config
+                  key: NOTIFICATION_QUEUE_URL
+                  optional: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 3
+            failureThreshold: 20
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+          volumeMounts:
+            - name: temporary
+              mountPath: /tmp
+      volumes:
+        - name: temporary
+          emptyDir:
+            sizeLimit: 100Mi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: notification-config
+  namespace: library
+data:
+  AWS_REGION: "ap-south-1"
+  # Set this for AWS/SQS mode; omit it for the local in-memory adapter.
+  NOTIFICATION_QUEUE_URL: "https://sqs.ap-south-1.amazonaws.com/380560899065/digital-library-dev-notification"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification
+  namespace: library
+spec:
+  selector: {app: notification}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

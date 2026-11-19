@@ -1,0 +1,80 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: library-observability
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 69.8.2
+    helm:
+      values: |
+        alertmanager:
+          enabled: false
+        prometheusOperator:
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 300m, memory: 256Mi}
+        kube-state-metrics:
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 200m, memory: 128Mi}
+        prometheus-node-exporter:
+          resources:
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+        grafana:
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 300m, memory: 384Mi}
+          admin:
+            existingSecret: grafana-admin
+          dashboardProviders:
+            dashboardproviders.yaml:
+              apiVersion: 1
+              providers:
+                - name: library
+                  folder: Digital Library
+                  type: file
+                  options: {path: /var/lib/grafana/dashboards}
+          dashboards:
+            library:
+              service-health:
+                json: |
+                  {
+                    "title": "Digital Library Service Health",
+                    "panels": [
+                      {"id": 1, "type": "timeseries", "title": "Service scrape availability percent", "targets": [{"expr": "avg by (app) (avg_over_time(up{namespace=\"library\",app=~\"member|catalog|lending|availability|fine|reservation|notification\"}[5m])) * 100", "legendFormat": "{{app}}"}]},
+                      {"id": 2, "type": "timeseries", "title": "HTTP requests per second", "targets": [{"expr": "sum by (app) (rate({__name__=~\".+_http_requests_total\",namespace=\"library\"}[5m]))", "legendFormat": "{{app}}"}]},
+                      {"id": 3, "type": "timeseries", "title": "HTTP 5xx errors per second", "targets": [{"expr": "sum by (app) (rate({__name__=~\".+_http_requests_total\",namespace=\"library\",status=~\"5..\"}[5m]))", "legendFormat": "{{app}}"}]},
+                      {"id": 4, "type": "timeseries", "title": "HTTP request success percent", "targets": [{"expr": "100 * sum by (app) (rate({__name__=~\".+_http_requests_total\",namespace=\"library\",status=~\"2..|3..\"}[5m])) / clamp_min(sum by (app) (rate({__name__=~\".+_http_requests_total\",namespace=\"library\"}[5m])), 1e-9)", "legendFormat": "{{app}}"}]},
+                      {"id": 5, "type": "timeseries", "title": "HTTP latency p95 seconds", "targets": [{"expr": "histogram_quantile(0.95, sum by (app, le) (rate({__name__=~\".+_http_request_duration_seconds_bucket\",namespace=\"library\"}[5m])))", "legendFormat": "{{app}}"}]},
+                      {"id": 6, "type": "timeseries", "title": "Available application replicas", "targets": [{"expr": "kube_deployment_status_replicas_available{namespace=\"library\"}", "legendFormat": "{{deployment}}"}]},
+                      {"id": 7, "type": "timeseries", "title": "HPA current and desired replicas", "targets": [{"expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"library\"}", "legendFormat": "{{horizontalpodautoscaler}} current"}, {"expr": "kube_horizontalpodautoscaler_status_desired_replicas{namespace=\"library\"}", "legendFormat": "{{horizontalpodautoscaler}} desired"}]},
+                      {"id": 8, "type": "timeseries", "title": "Cluster CPU cores used", "targets": [{"expr": "sum(rate(container_cpu_usage_seconds_total{container!=\"\",container!=\"POD\"}[5m]))", "legendFormat": "CPU cores"}]},
+                      {"id": 9, "type": "timeseries", "title": "Pod readiness percent", "targets": [{"expr": "100 * avg by (namespace, pod) (avg_over_time(kube_pod_status_ready{namespace=\"library\",condition=\"true\"}[5m]))", "legendFormat": "{{pod}}"}]},
+                      {"id": 10, "type": "timeseries", "title": "Ready cluster nodes", "targets": [{"expr": "sum by (node) (kube_node_status_condition{condition=\"Ready\",status=\"true\"})", "legendFormat": "{{node}}"}]},
+                      {"id": 11, "type": "timeseries", "title": "Container restarts in five minutes", "targets": [{"expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"library\"}[5m]))", "legendFormat": "{{pod}}"}]},
+                      {"id": 12, "type": "timeseries", "title": "Application pod memory working set", "targets": [{"expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"library\",container!=\"\",container!=\"POD\"})", "legendFormat": "{{pod}}"}]}
+                    ]
+                  }
+        prometheus:
+          prometheusSpec:
+            serviceMonitorSelectorNilUsesHelmValues: false
+            retention: 1d
+            retentionSize: 512MB
+            resources:
+              requests: {cpu: 200m, memory: 512Mi}
+              limits: {cpu: 500m, memory: 1Gi}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -1,0 +1,131 @@
+"""FIFO reservation API."""
+
+from contextlib import asynccontextmanager
+from time import perf_counter
+from uuid import UUID
+
+from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
+from prometheus_client import CollectorRegistry, Counter, Histogram, generate_latest
+from prometheus_client.exposition import CONTENT_TYPE_LATEST
+
+from app.coordinator import configured_coordinator
+from app.dependencies import ReservationDependencies
+from app.database import (
+    DuplicateReservationError,
+    ReservationStore,
+    configured_engine,
+    initialize_database,
+)
+from app.models import ReservationCreate, ReservationPage, ReservationResponse
+from app.outbox import start_outbox_worker
+
+
+def create_app(store: ReservationStore | None = None, coordinator=None, dependencies=None) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(application: FastAPI):
+        if store is None:
+            engine = configured_engine()
+            initialize_database(engine)
+            application.state.store = ReservationStore(engine)
+        else:
+            application.state.store = store
+            engine = store.engine
+        # The worker publishes committed rows asynchronously and leaves failures available for retry.
+        application.state.outbox_worker = start_outbox_worker(engine)
+        application.state.dependencies = (
+            dependencies if dependencies is not None else ReservationDependencies.configured()
+        )
+        application.state.coordinator = coordinator or configured_coordinator()
+        yield
+        close_coordinator = getattr(application.state.coordinator, "close", None)
+        if close_coordinator is not None:
+            close_coordinator()
+        if application.state.outbox_worker is not None:
+            application.state.outbox_worker.stop()
+        if dependencies is None and application.state.dependencies is not None:
+            application.state.dependencies.close()
+
+    app = FastAPI(title="Digital Library Reservation Service", lifespan=lifespan)
+    registry = CollectorRegistry()
+    requests = Counter("reservation_http_requests_total", "HTTP requests", ["method", "route", "status"], registry=registry)
+    durations = Histogram("reservation_http_request_duration_seconds", "HTTP duration", ["method", "route"], registry=registry)
+
+    @app.middleware("http")
+    async def record_request(request: Request, call_next):
+        started = perf_counter()
+        status = 500
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            return response
+        finally:
+            route = getattr(request.scope.get("route"), "path", "unmatched")
+            requests.labels(request.method, route, str(status)).inc()
+            durations.labels(request.method, route).observe(perf_counter() - started)
+
+    @app.exception_handler(DuplicateReservationError)
+    async def duplicate_reservation(request: Request, error: DuplicateReservationError):
+        return JSONResponse(
+            status_code=409,
+            content={"detail": "Member already has an active reservation for this book"},
+        )
+
+    @app.get("/health")
+    def health():
+        return {"status": "ok"}
+
+    @app.get("/metrics", include_in_schema=False)
+    def metrics():
+        return Response(generate_latest(registry), headers={"Content-Type": CONTENT_TYPE_LATEST})
+
+    @app.get("/ready")
+    def ready(request: Request):
+        coordinator_ready = getattr(request.app.state.coordinator, "ready", None)
+        if coordinator_ready is not None:
+            coordinator_ready()
+        request.app.state.store.get(UUID(int=0))
+        if request.app.state.dependencies is not None:
+            request.app.state.dependencies.ready()
+        return {"status": "ready"}
+
+    # Locks the book, validates dependencies, then writes the reservation and outbox event.
+    @app.post("/reservations", status_code=201, response_model=ReservationResponse)
+    def create(data: ReservationCreate, request: Request):
+        dependencies = request.app.state.dependencies
+        with request.app.state.coordinator.lock(str(data.book_id)):
+            copy_id = dependencies.validate(data) if dependencies is not None else None
+            reservation = request.app.state.store.create(
+                data, ready=dependencies is None or copy_id is not None, copy_id=copy_id
+            )
+        return reservation
+
+    # Lists one member's reservations with stable pagination.
+    @app.get("/reservations", response_model=ReservationPage)
+    def list_for_member(
+        member_id: UUID,
+        request: Request,
+        limit: int = Query(default=20, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+    ):
+        items, total = request.app.state.store.list_for_member(member_id, limit, offset)
+        return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+    # Retrieves the current state of a hold.
+    @app.get("/reservations/{reservation_id}", response_model=ReservationResponse)
+    def get(reservation_id: UUID, request: Request):
+        reservation = request.app.state.store.get(reservation_id)
+        if reservation is None:
+            raise HTTPException(404, "Reservation not found")
+        return reservation
+
+    # Cancels a hold under the book lock and promotes the FIFO waiter when needed.
+    @app.delete("/reservations/{reservation_id}", response_model=ReservationResponse)
+    def cancel(reservation_id: UUID, request: Request):
+        existing = request.app.state.store.get(reservation_id)
+        if existing is None:
+            raise HTTPException(404, "Reservation not found")
+        with request.app.state.coordinator.lock(str(existing.book_id)):
+            return request.app.state.store.cancel(reservation_id)
+
+    return app

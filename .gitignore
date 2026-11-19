@@ -1,0 +1,14 @@
+# Local Terraform state and variables can contain account metadata or credentials.
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/*.tfplan
+infra/terraform.tfvars
+
+# Generated build, test, and local-runtime files do not belong in source control.
+.local/
+**/__pycache__/
+**/.pytest_cache/
+**/target/
+**/node_modules/
+.env
