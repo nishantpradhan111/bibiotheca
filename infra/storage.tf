@@ -78,13 +78,10 @@ resource "aws_dynamodb_table" "copies" {
   }
   global_secondary_index {
     name            = "book_id-index"
+    hash_key        = "book_id"
     projection_type = "ALL"
     read_capacity   = 5
     write_capacity  = 5
-    key_schema {
-      attribute_name = "book_id"
-      key_type       = "HASH"
-    }
   }
   server_side_encryption {
     enabled = true

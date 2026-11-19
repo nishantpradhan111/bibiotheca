@@ -52,8 +52,23 @@ cat > "$agent_config" <<'JSON'
 }
 JSON
 
-/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
-  -a fetch-config \
-  -m ec2 \
-  -c "file:${agent_config}" \
-  -s
+# EMR bootstrap actions run before selected applications are installed. Apply
+# the custom log configuration after the CloudWatch agent becomes available;
+# otherwise a missing agent binary makes EMR terminate the cluster.
+nohup bash -c '
+  set -u
+  agent_config="/tmp/digital-library-cloudwatch-agent.json"
+  agent_ctl="/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl"
+  for attempt in $(seq 1 60); do
+    if [ -x "$agent_ctl" ]; then
+      sudo "$agent_ctl" -m ec2 -a append-config -c "file:${agent_config}"
+      sudo systemctl restart amazon-cloudwatch-agent
+      exit 0
+    fi
+    sleep 10
+  done
+  echo "CloudWatch agent was not installed within the wait window; continuing without custom log forwarding."
+  exit 0
+' >/tmp/digital-library-cloudwatch-bootstrap.log 2>&1 &
+
+exit 0

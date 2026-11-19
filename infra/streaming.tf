@@ -145,7 +145,7 @@ resource "aws_emr_cluster" "analytics" {
   count                             = var.enable_analytics_cluster ? 1 : 0
   name                              = "${local.name}-analytics"
   release_label                     = "emr-7.14.0"
-  applications                      = ["Flink", "AmazonCloudWatchAgent"]
+  applications                      = ["Flink"]
   service_role                      = aws_iam_role.emr_service.arn
   log_uri                           = "s3://${aws_s3_bucket.covers.bucket}/emr-logs/"
   keep_job_flow_alive_when_no_steps = true
@@ -157,11 +157,6 @@ resource "aws_emr_cluster" "analytics" {
     emr_managed_slave_security_group  = aws_security_group.streaming.id
     service_access_security_group     = aws_security_group.emr_service_access.id
     instance_profile                  = aws_iam_instance_profile.emr_ec2.arn
-  }
-
-  bootstrap_action {
-    name = "forward-analytics-logs-to-cloudwatch"
-    path = "s3://${aws_s3_bucket.covers.bucket}/${aws_s3_object.emr_cloudwatch_bootstrap.key}"
   }
 
   master_instance_group {

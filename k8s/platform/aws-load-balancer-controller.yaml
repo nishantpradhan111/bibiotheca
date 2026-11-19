@@ -6,7 +6,7 @@ metadata:
   namespace: kube-system
   annotations:
     argocd.argoproj.io/sync-wave: "0"
-    eks.amazonaws.com/role-arn: __LBC_ROLE_ARN__
+    eks.amazonaws.com/role-arn: arn:aws:iam::072718160501:role/digital-library-dev-load-balancer-controller
 ---
 # The child Application keeps controller installation and upgrades in GitOps.
 apiVersion: argoproj.io/v1alpha1
@@ -25,11 +25,11 @@ spec:
     helm:
       parameters:
         - name: clusterName
-          value: __EKS_CLUSTER_NAME__
+          value: digital-library-dev
         - name: region
-          value: __AWS_REGION__
+          value: us-east-1
         - name: vpcId
-          value: __VPC_ID__
+          value: vpc-0e353ead26c537faf
         - name: serviceAccount.create
           value: "false"
         - name: serviceAccount.name

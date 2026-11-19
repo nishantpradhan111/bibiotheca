@@ -23,7 +23,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: fine
-          image: "380560899065.dkr.ecr.ap-south-1.amazonaws.com/digital-library-dev/fine@sha256:a330855d55dbafcc988bfe64d7ba645de095da6cf90b31910e3e2af481de01e1"
+          image: "072718160501.dkr.ecr.us-east-1.amazonaws.com/digital-library-dev/fine@sha256:6782ced8e7c0dca1d8aab2dbdf2656bf7399eebab89c5059e7da75c811668f02"
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

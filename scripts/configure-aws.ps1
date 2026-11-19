@@ -1,12 +1,13 @@
 param(
     [Parameter(Mandatory = $true)][string]$ImagesFile,
     [string]$OutputsFile = '',
-    [string]$ManifestDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'k8s')
+    [string]$ManifestDirectory = ''
 )
 
 # Local file preparation only: no apply, publish, secret creation, or cluster calls.
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+if (!$ManifestDirectory) { $ManifestDirectory = Join-Path $projectRoot 'k8s' }
 $images = Get-Content -LiteralPath $ImagesFile -Raw | ConvertFrom-Json
 if ($OutputsFile) {
     $outputs = Get-Content -LiteralPath $OutputsFile -Raw | ConvertFrom-Json

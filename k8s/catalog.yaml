@@ -4,7 +4,7 @@ metadata:
   name: catalog
   namespace: library
   annotations:
-    eks.amazonaws.com/role-arn: "arn:aws:iam::380560899065:role/digital-library-dev-catalog"
+    eks.amazonaws.com/role-arn: "arn:aws:iam::072718160501:role/digital-library-dev-catalog"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -13,11 +13,11 @@ metadata:
   namespace: library
 data:
   APP_ENV: aws
-  AWS_REGION: "ap-south-1"
+  AWS_REGION: "us-east-1"
   AWS_EC2_METADATA_DISABLED: "true"
   BOOKS_TABLE: "digital-library-dev-Books"
   COPIES_TABLE: "digital-library-dev-Copies"
-  COVERS_BUCKET: "replace-with-globally-unique-library-cover-bucket"
+  COVERS_BUCKET: "globally-unique-library-covers-bucket"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -48,7 +48,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: catalog
-          image: "380560899065.dkr.ecr.ap-south-1.amazonaws.com/digital-library-dev/catalog@sha256:f010c835741407f42f9e75d323abefa1046b7695bd51607b9cf4e50eee223ae8"
+          image: "072718160501.dkr.ecr.us-east-1.amazonaws.com/digital-library-dev/catalog@sha256:949209c6eab8fc92e27af38ca81b97aa63e4422719f541cde53c08694b895f4a"
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
